@@ -1,10 +1,13 @@
 import 'dart:io';
 
 import 'package:band_names/models/band.dart';
+import 'package:band_names/services/socket_service.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/src/foundation/key.dart';
 import 'package:flutter/src/widgets/framework.dart';
+import 'package:pie_chart/pie_chart.dart';
+import 'package:provider/provider.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({Key? key}) : super(key: key);
@@ -22,16 +25,58 @@ class _HomePageState extends State<HomePage> {
   ];
 
   @override
+  void initState() {
+    final socketService = Provider.of<SocketService>(context, listen: false);
+
+    socketService.socket.on('active-bands', _handleActiveBands);
+    // TODO: implement initState
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    final socketService = Provider.of<SocketService>(context, listen: false);
+    socketService.socket.off('active-bands');
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final socketService = Provider.of<SocketService>(context);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('BandNames', style: TextStyle(color: Colors.black87)),
         backgroundColor: Colors.white,
         elevation: 1,
+        actions: [
+          Container(
+              margin: const EdgeInsets.only(right: 10),
+              child: (socketService.serverStatus == ServerStatus.Online)
+                  ? IconButton(
+                      icon: const Icon(Icons.check_circle),
+                      color: Colors.blue[300],
+                      onPressed: () {},
+                    )
+                  : IconButton(
+                      icon: const Icon(Icons.offline_bolt),
+                      color: Colors.red,
+                      onPressed: () {},
+                    )),
+        ],
       ),
-      body: ListView.builder(
-          itemCount: bands.length,
-          itemBuilder: (context, index) => _bandTile(bands[index])),
+      body: Column(
+        children: [
+          _showGraph(),
+          Expanded(
+            child: ListView.builder(
+              itemCount: bands.length,
+              itemBuilder: (BuildContext context, int index) =>
+                  _bandTile(bands[index]),
+            ),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: addNewBand,
         child: const Icon(Icons.add),
@@ -40,12 +85,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _bandTile(Band band) {
+    final socketService = Provider.of<SocketService>(context, listen: false);
+
     return Dismissible(
       key: Key(band.id),
       direction: DismissDirection.startToEnd,
-      onDismissed: (direction) {
-        print('direction: $direction');
-      },
+      onDismissed: (direction) =>
+          socketService.emit('delete-band', {'id': band.id}),
       background: Container(
         padding: const EdgeInsets.only(left: 8.0),
         color: Colors.red,
@@ -64,7 +110,7 @@ class _HomePageState extends State<HomePage> {
         ),
         title: Text(band.name),
         trailing: Text('${band.votes}', style: const TextStyle(fontSize: 20)),
-        onTap: () {},
+        onTap: () => socketService.emit('vote-band', {'id': band.id}),
       ),
     );
   }
@@ -116,10 +162,25 @@ class _HomePageState extends State<HomePage> {
   void addBandToList(String name) {
     if (name.length > 1) {
       // Podemos agregar
-      bands.add(Band(id: DateTime.now().toString(), name: name, votes: 0));
-      setState(() {});
+      final socketService = Provider.of<SocketService>(context, listen: false);
+      socketService.socket.emit('add-band', {'name': name});
     }
 
     Navigator.pop(context);
+  }
+
+  _handleActiveBands(data) {
+    bands = (data as List).map((band) => Band.fromMap(band)).toList();
+    setState(() {});
+  }
+
+  Widget _showGraph() {
+    Map<String, double> dataMap = {};
+
+    for (var band in bands) {
+      dataMap.putIfAbsent(band.name, () => band.votes.toDouble());
+    }
+
+    return PieChart(dataMap: dataMap);
   }
 }
